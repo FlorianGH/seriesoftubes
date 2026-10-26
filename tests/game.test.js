@@ -405,3 +405,47 @@ test('#117 several scrubbing centers: nearest first, spill to the next, and far 
   assert.equal(ev("S.scrubs.some(x=>x.city==='lon')"), false);
   assert.deepEqual(errors, []);
 });
+
+test('your own fiber can be finished at once, for the crews it would still take', () => {
+  const { ev, errors } = load();
+  ev("ACT.start({});S.cash=1e8;S.lvl=4;for(const g of GOALS)S.done[g.id]=0;ACT.launchBB({city:'fra'})");
+  ev("for(const b of ['ams','par']){ACT.buildPop({city:b});UI.pending={a:'fra',b};UI.lmode='df';UI.dfSrc='build';UI.dfSys='lite';ACT.orderDf();closeModal();}UI.lmode='wave'");
+  const ids = JSON.parse(ev("JSON.stringify(S.links.filter(l=>l.kind==='df'&&l.own).map(l=>l.id))"));
+  assert.equal(ids.length, 2);
+  // two builds 75 days from done, with the same crew price: three hires bring each one to tomorrow
+  ev("for(const l of S.links)if(l.kind==='df'){l.ready=S.day+75;l.km=400;}");
+  const L = (i) => `S.links.find(l=>l.id==='${ids[i]}')`, panel = () => ev("document.getElementById('panelBody').textContent");
+  const crew = ev(`crewCost(${L(0)})`);
+  let cash = ev('S.cash'), hires = 0;
+  ev(`UI.sel={type:'link',id:'${ids[0]}'};renderPanel()`);
+  while (/Hire extra crews/.test(panel())) { ev(`ACT.crews({id:'${ids[0]}'})`); assert.ok(++hires < 10); }
+  assert.equal(hires, 3);
+  assert.equal(ev(`${L(0)}.ready-S.day`), 1, 'crews stop at tomorrow');
+  const viaCrews = cash - ev('S.cash');
+  assert.equal(viaCrews, 3 * crew);
+  assert.doesNotMatch(panel(), /Finish now/, 'with a day left there is nothing to speed up');
+  ev(`ACT.crews({id:'${ids[0]}'})`);
+  assert.equal(cash - ev('S.cash'), viaCrews, 'and hiring crews then takes no money');
+  // the other one in one go, for the same money, and done today instead of tomorrow
+  ev(`UI.sel={type:'link',id:'${ids[1]}'};renderPanel()`);
+  assert.ok(panel().includes('Finish now ' + ev(`fmt$(${viaCrews})`)), 'the button shows the price');
+  cash = ev('S.cash');
+  ev(`ACT.finishNow({id:'${ids[1]}'})`);
+  assert.equal(cash - ev('S.cash'), viaCrews);
+  assert.equal(ev(`${L(1)}.ready`), ev('S.day'));
+  assert.match(ev('S.log[0].t'), /Your fiber is finished/);
+  assert.doesNotMatch(panel(), /Under construction/);
+  const done = (i) => ev(`S.log.filter(e=>/Your fiber is finished/.test(e.t)&&e.t.includes(CITY[${L(i)}.b].name)).length`);
+  ev('dayTick()');
+  assert.equal(done(0), 1, 'the crewed one finishes the next day');
+  assert.equal(done(1), 1, 'the finished one is not announced again');
+  // nothing on a finished build, on leased fiber or without the cash
+  cash = ev('S.cash');
+  ev(`ACT.finishNow({id:'${ids[1]}'})`);
+  ev(`${L(0)}.ready=S.day+40;${L(0)}.own=false;ACT.finishNow({id:'${ids[0]}'});ACT.crews({id:'${ids[0]}'})`);
+  assert.equal(ev('S.cash'), cash);
+  ev(`${L(0)}.own=true;S.cash=10;ACT.finishNow({id:'${ids[0]}'})`);
+  assert.equal(ev(`${L(0)}.ready-S.day`), 40);
+  assert.equal(ev('S.cash'), 10);
+  assert.deepEqual(errors, []);
+});

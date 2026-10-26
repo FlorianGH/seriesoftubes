@@ -213,3 +213,59 @@ test('community exchanges are wired up in every city, and Barcelona has Catnip-I
   }
   assert.deepEqual(errors, []);
 });
+
+test('a PNI with every willing network at a POP in one go, at one port size and site', () => {
+  const { ev, errors } = load();
+  setup(ev);
+  ev("ACT.launchBB({city:'fra'});compute();selectCity('fra');ACT.tab({t:'peer'})");
+  const panel = () => ev("document.getElementById('panelBody').textContent");
+  const will = JSON.parse(ev("JSON.stringify(pniWilling('fra').map(n=>n.id))"));
+  const no = JSON.parse(ev("JSON.stringify(NETS.filter(n=>n.pops.includes('fra')&&!peerOk(n.id,'pni','fra').ok).map(n=>n.id))"));
+  assert.ok(will.length > 2 && no.length > 0, 'some networks here say yes and some no');
+  assert.match(panel(), new RegExp(`PNI with all ${will.length} willing networks`));
+  const paid = ev("pniWilling('fra').reduce((a,n)=>a+(peerOk(n.id,'pni','fra').fee||0),0)");
+  if (paid) assert.ok(panel().includes('Paid peering: ' + ev(`fmt$(${paid})`) + '/mo on top'), 'paid peering is shown before you buy');
+  // 100G each needs more router ports than this POP has: nothing is bought
+  ev('ACT.pniPick({t:1})');
+  assert.equal(ev('UI.pniT'), 1);
+  assert.match(panel(), new RegExp(`Needs ${will.length} free router ports here, ${ev("portsMax('fra')")} left`));
+  let cash = ev('S.cash');
+  ev("ACT.pniAll({city:'fra',t:1,s:'a'})");
+  assert.equal(ev('S.pni.length'), 0);
+  assert.equal(ev('S.cash'), cash);
+  // 10G ports take a quarter of a slot each, so they fit
+  ev('ACT.pniPick({t:0})');
+  assert.ok(panel().includes(`PNI with all ${will.length} willing networks ` + ev(`fmt$(${will.length}*(1500+PORT[0].setup/2))`)));
+  ev("ACT.pniAll({city:'fra',t:0,s:'b'})");
+  assert.equal(cash - ev('S.cash'), will.length * ev('1500+PORT[0].setup/2'));
+  assert.deepEqual(JSON.parse(ev("JSON.stringify(S.pni.map(p=>p.net))")), will, 'one PNI per willing network, in list order');
+  assert.ok(ev("S.pni.every(p=>p.city==='fra'&&p.tier===0&&!p.site&&!p.n)"), 'one 10G port each, in site A (there is no B here)');
+  for (const id of no) assert.equal(ev(`S.pni.some(p=>p.net==='${id}')`), false, `${id} said no`);
+  assert.ok(ev(`S.log.some(e=>e.t.startsWith('${will.length} new PNIs in Frankfurt.'))`), 'one message for all of them');
+  assert.doesNotMatch(panel(), /PNI with all/, 'nobody left to ask');
+  // with a second building, both sites: two LAG members per PNI, one in each, for twice the ports and money
+  ev("ACT.buildPop({city:'ams'});ACT.launchBB({city:'ams'});ACT.addSite({city:'ams'});compute();selectCity('ams');ACT.tab({t:'peer'})");
+  const n2 = ev("pniWilling('ams').length");
+  assert.ok(n2 > 1);
+  ev("ACT.pniPick({s:'ab'})");
+  assert.match(panel(), /Site:.*Both/);
+  cash = ev('S.cash');
+  const used = ev("portsUsed('ams')");
+  ev("ACT.pniAll({city:'ams',t:0,s:'ab'})");
+  assert.equal(cash - ev('S.cash'), n2 * 2 * ev('1500+PORT[0].setup/2'));
+  assert.equal(ev("portsUsed('ams')") - used, n2 * 2 * 0.25);
+  assert.ok(ev("S.pni.filter(p=>p.city==='ams').every(p=>p.n===2&&p.site==='ab')"));
+  ev('compute()');
+  assert.ok(ev("S.pni.filter(p=>p.city==='ams').some(p=>R.usePni[p.id]>0)"), 'and they carry traffic');
+  // saved and loaded, they are the same PNIs
+  const before = ev("JSON.stringify(S.pni.map(p=>[p.net,p.city,p.tier,p.n||1,p.site||'a']))");
+  ev('S=migrate(JSON.parse(JSON.stringify(S)));compute()');
+  assert.equal(ev("JSON.stringify(S.pni.map(p=>[p.net,p.city,p.tier,p.n||1,p.site||'a']))"), before);
+  // the picker survives bad input, and a phone shows the controls
+  ev("ACT.pniPick({t:99,s:'zz'})");
+  assert.equal(ev('UI.pniT'), 0);
+  assert.equal(ev('UI.pniS'), 'ab');
+  ev("ACT.buildPop({city:'par'});compute();window.innerWidth=360;selectCity('par');ACT.tab({t:'peer'});renderAll()");
+  assert.ok(ev("!!document.querySelector('#panelBody [data-act=\"pniAll\"]')"));
+  assert.deepEqual(errors, []);
+});

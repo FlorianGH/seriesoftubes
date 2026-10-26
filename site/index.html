@@ -2476,6 +2476,19 @@ const liveCap=(g,c,site,n)=>{const k=liveN(c,site,n);return k?lagCap(g,k):0;};
 const onSite=(site,s)=>(site||'a')===s||site==='ab';
 function siteCtl(k,id,c,cur){const p=S.pops[c];if(!p||!p.site2)return '';cur=cur||'a';const n=k==='t'?(S.transit.find(x=>x.id===id)||{}).n:k==='p'?(S.pni.find(x=>x.id===id)||{}).n:(S.ixn||{})[id];return `<div class="seg site"><span class="meta">${tr('Site:')}</span>${['a','b'].map(x=>btn(`${x.toUpperCase()} <small>${esc(siteName(c,x))}</small>`,'siteSet',{k,id,s:x},cur===x?'pink sm':'ghost sm')).join('')}${btn(k==='ix'&&S.myIx[id]?tr('Both <small>a second switch, +{price}/mo</small>',{price:fmt$(Math.round(myFab(id).mo/2))}):(n||1)<2?tr('Both <small>adds a LAG member</small>'):tr('Both <small>split the LAG</small>'),'siteSet',{k,id,s:'ab'},cur==='ab'?'pink sm':'ghost sm')}</div>`;}
 function portOk(c,i){const p=S.pops[c];return i<=RG[p?(p.rgen||0):0].maxP;}
+// Every network here that would take a PNI today and has none yet, in the order the PNI list shows them.
+function pniWilling(c){const have=new Set();for(const x of S.pni)if(x.city===c)have.add(x.net);return NETS.filter(n=>n.pops.includes(c)&&!have.has(n.id)&&peerOk(n.id,'pni',c).ok);}
+// A PNI with each of them at once: one port size (the biggest this router takes, if the pick is too big for it) and,
+// with a second building, site A, B or both. The button shows the whole bill first.
+function pniAllCtl(c){const will=pniWilling(c),p=S.pops[c];if(will.length<2)return '';
+  let t=PORT[UI.pniT]?UI.pniT:0;while(t>0&&!portOk(c,t))t--;
+  const s=p.site2&&['b','ab'].includes(UI.pniS)?UI.pniS:'a',m=s==='ab'?2:1,cost=will.length*m*(1500+PORT[t].setup/2),mo=will.length*m*PORT[t].pni,
+    fee=will.reduce((a,n)=>a+(peerOk(n.id,'pni',c).fee||0),0),need=will.length*m*PORT_SLOT(t),free=portsMax(c)-portsUsed(c),fits=need<=free+1e-9;
+  return `<div class="seg site"><span class="meta">${tr('Port:')}</span>${PORT.map((P2,i)=>portShown(i)?btn(P2.n,'pniPick',{t:i},i===t?'pink sm':'ghost sm',!portOk(c,i)):'').join('')}</div>`
+    +(p.site2?`<div class="seg site"><span class="meta">${tr('Site:')}</span>${['a','b'].map(x=>btn(`${x.toUpperCase()} <small>${esc(siteName(c,x))}</small>`,'pniPick',{s:x},s===x?'pink sm':'ghost sm')).join('')}${btn(tr('Both <small>adds a LAG member</small>'),'pniPick',{s:'ab'},s==='ab'?'pink sm':'ghost sm')}</div>`:'')
+    +`<div class="seg site">${btn(tr('PNI with all {n} willing networks <small>{cost} + {mo}/mo</small>',{n:will.length,cost:fmt$(cost),mo:fmt$(mo)}),'pniAll',{city:c,t,s},'pink sm',!fits||S.cash<cost)}</div>`
+    +(fee?`<div class="meta">${tr('Paid peering: {price}/mo on top',{price:fmt$(fee)})}</div>`:'')
+    +(fits?'':`<div class="why">${tr('Needs {need} free router ports here, {free} left.',{need:fmtPorts(need),free:fmtPorts(Math.max(0,free))})}</div>`);}
 function waveOk(a,b,i){return [a,b].every(c=>i<=RG[S.pops[c]?(S.pops[c].rgen||0):0].maxLT);}
 function waveNeed(i){const g=RG.find(r=>r.maxLT>=i);return g?tr('{pn} routers',{pn:g.pn}):'?';}
 function routerModels(c){const p=S.pops[c],g=p.rgen||0,rt=p.routers||1;
@@ -2811,7 +2824,7 @@ function dayTick(){
   S.hist=S.hist||[];S.hist.push({d,dem:+R.demand.toFixed(2),srv:+R.served.toFixed(2),c:+(R.egT.c||0).toFixed(2),p:+(R.egT.p||0).toFixed(2),ix:+(R.egT.ix||0).toFixed(2),t:+(R.egT.t||0).toFixed(2),l2:+(R.egT.l2||0).toFixed(2),rev:Math.round(R.revMo),cost:Math.round(R.costMo),cash:Math.round(S.cash),inc:S.inc.length});if(S.hist.length>180)S.hist.shift();
   {const top=custLevel();if(top>(S.lvl||1)){for(let lv=(S.lvl||1)+1;lv<=top;lv++){track('level_'+lv);toast(tr('<b>Customer level {lv}: {name}</b><br>New customers unlocked: {unlock}',{lv,name:LEVELS[lv-1].n,unlock:LEVELS[lv-1].unlock})+`<br><i>${esc(LEVELS[lv-1].q)}</i>`,'goal');}S.lvl=top;sfx('coin');}}
   for(const l of S.links){if(l.kind!=='df')continue;
-    if(l.ready===d){toast(`<b>${l.own?tr('Your fiber is finished: {a}–{b}',{a:CITY[l.a].name,b:CITY[l.b].name}):tr('Dark fiber handed over: {a}–{b}',{a:CITY[l.a].name,b:CITY[l.b].name})}</b><br>${(l.ch||[]).length?tr('Channels are lighting up now.'):tr('It is dark. Add optics to light it up.')}`,'goal',[{l:tr('Open'),act:'selLink',args:{id:l.id}}]);sfx('coin');}
+    if(l.ready===d)fiberDone(l);
     if(l.own&&l.ready>d&&Math.random()<0.012){const extra=10+Math.floor(Math.random()*40);l.ready+=extra;toast(tr('<b>Construction delay: +{n} days</b><br>{why} ({a}–{b})',{n:extra,why:pick(l.sub?SEA_DELAYS.map(x=>tr(x)):[tr('Archaeologists found a Roman bathhouse on your route.'),tr('A protected hamster species lives along the right-of-way.'),tr('The railway changed its mind about the easement.'),tr('The drilling crew hit a granite boulder the size of a bus.'),tr('A town council wants a public hearing. About the color of the manhole covers.'),tr('Somebody else’s gas main was exactly where the map said it was not.'),tr('The permit office lost your permit. And then the replacement.')]),a:CITY[l.a].name,b:CITY[l.b].name}),'bad');}}
   // DDoS protection SLA: if a protected customer's own city is hit and still goes down, you pay out (once per attack).
   if(S.ev.ddos&&S.ev.ddos.until>d){const a=S.ev.ddos;
@@ -3081,6 +3094,14 @@ const ACT={
    const ex=S.pni.find(p=>p.city===city&&p.net===net);if(ex&&tier<=ex.tier)return;if(!portGate(city,ex?(PORT_SLOT(tier)-PORT_SLOT(ex.tier))*(ex.n||1):PORT_SLOT(tier)))return;if(!spend((1500+PORT[tier].setup/2)*(ex&&ex.n||1)))return;if(ex)ex.tier=tier;else S.pni.push({id:uid(),city,net,tier});
    toast(tr('<b>PNI with {net} is up.</b><br>A cross-connect in {dc}. Private and fast.',{net:esc(NET[net].name),dc:esc(CITY[city].dc)}),'good');after();},
  cancelPni:({id,ok})=>{if(!ok&&UI.confirm!==id){UI.confirm=id;renderPanel();return;}S.pni=S.pni.filter(p=>p.id!==id);UI.confirm=null;after();},
+ pniPick:({t,s})=>{if(PORT[t])UI.pniT=+t;if(['a','b','ab'].includes(s))UI.pniS=s;renderPanel();},
+ pniAll:({city,t,s})=>{t=+t;const p=S.pops[city];if(!p||!PORT[t]||!['a','b','ab'].includes(s))return;if(!p.site2)s='a';
+   if(!portOk(city,t)){toast(tr("<b>Your router can't take a {port} port.</b><br>Upgrade it in the Infra tab.",{port:PORT[t].n}),'bad');sfx('err');return;}
+   const will=pniWilling(city),m=s==='ab'?2:1;if(!will.length)return;
+   if(!portGate(city,will.length*m*PORT_SLOT(t))||!spend(will.length*m*(1500+PORT[t].setup/2)))return;
+   for(const n of will){const x={id:uid(),city,net:n.id,tier:t};if(m>1)x.n=m;if(s!=='a')x.site=s;S.pni.push(x);}
+   if(S.conf&&S.conf.until>S.day)S.stats.beerPni=1;
+   toast(trn('<b>{n} new PNI in {city}.</b><br>A cross-connect in {dc}. Private and fast.','<b>{n} new PNIs in {city}.</b><br>One cross-connect per network in {dc}. Private and fast.',will.length,{city:esc(CITY[city].name),dc:esc(CITY[city].dc)}),'good');after();},
  cache:({city,net})=>{const n=NET[net];if(!n||!n.cache||!S.pops[city])return;if((R.demTo[net]||0)<n.cache.min){toast(tr('<b>{net} says not yet.</b><br>Send them {min}+ Gbps first.',{net:esc(n.name),min:n.cache.min}),'bad');sfx('err');return;}if(!portGate(city,1))return;
    {const hv=S.caches.filter(x=>x.city===city&&x.net===net),nb=hv.filter(x=>x.site==='b').length;S.caches.push({id:uid(),city,net,site:S.pops[city].site2&&nb<hv.length-nb?'b':'a'});}toast(tr('<b>{cache} installed in {city}!</b><br>{net} shipped it for free. You pay {mo}/mo power.',{cache:esc(n.cache.name),city:CITY[city].name,net:esc(n.name),mo:fmt$(CACHE_MO)}),'good');sfx('build');after();},
  rmCache:({id})=>{S.caches=S.caches.filter(c=>c.id!==id);after();},
@@ -3204,7 +3225,8 @@ const ACT={
  addPair:({id})=>{const l=S.links.find(x=>x.id===id);if(!l||l.kind!=='df'||!l.own||!isRdm(l.sys)||l.ready>S.day)return;const n=Math.max(1,l.pairs|0);if(n>=pairsMax(l))return;if((l.ch||[]).length+soldSlots(l)<chMax(l)){toast(tr('<b>Fill this pair first.</b><br>Light all {max} channels before you light another fiber pair.',{max:chMax(l)}),'bad');sfx('err');return;}if(!spend(pairCost(l)))return;l.pairs=n+1;toast(tr('<b>Fiber pair {n} is lit: {a}–{b}.</b><br>Another ROADMaster 9000 and a fresh chain of amplifiers. Room for {m} more channels.',{n:n+1,a:CITY[l.a].name,b:CITY[l.b].name,m:DF_SYS[l.sys].max}),'good');sfx('build');after();},
  upSys:({id})=>{const l=S.links.find(x=>x.id===id),to=l&&sysNext(l);if(!to||DF_SYS[to].lvl>lvl())return;if(!spend(sysUpCost(l)))return;l.sys=to;if(l.ready<=S.day){l.eqDown=S.day+1;toast(tr('<b>Line system swap</b><br>All channels are dark for a day while the ROADMs go in.'),'bad');}after();},
  spares:({id})=>{const l=S.links.find(x=>x.id===id);if(!l)return;l.spares=!l.spares;sfx('click');after();},
- crews:({id})=>{const l=S.links.find(x=>x.id===id);if(!l||l.ready<=S.day)return;const c=Math.round(15000+l.km*6);if(!spend(c))return;l.ready=Math.max(S.day+1,l.ready-30);toast(tr('<b>More crews on site.</b><br>Construction is 30 days ahead.'),'good');after();},
+ crews:({id})=>{const l=S.links.find(x=>x.id===id);if(!l||l.kind!=='df'||!l.own||!(crewHires(l)>=1))return;if(!spend(crewCost(l)))return;l.ready=Math.max(S.day+1,l.ready-30);toast(tr('<b>More crews on site.</b><br>Construction is 30 days ahead.'),'good');after();},
+ finishNow:({id})=>{const l=S.links.find(x=>x.id===id);if(!l||l.kind!=='df'||!l.own||!(crewHires(l)>=1))return;if(!spend(crewHires(l)*crewCost(l)))return;l.ready=S.day;fiberDone(l);after();},
  addGen:({city})=>{const p=S.pops[city];if(!p||p.gen)return;if(!spend(GEN_COST))return;p.gen=true;floater(CITY[city].x,CITY[city].y-30,tr('Generator!'),'#FF8A3D');after();},
  randomName:()=>{const input=$('nmIn');if(input)input.value=UI.nm=randomNetworkName(input.value);},
  start:()=>{const nm=(($('nmIn')&&$('nmIn').value)||randomNetworkName()).slice(0,24);beginGame(nm,UI.startCity,{mode:UI.mode==='sandbox'?'sandbox':'normal'});},
@@ -3519,7 +3541,7 @@ function cityPanel(c){
   }else if(UI.tab==='peer'){
     h+=portNote(c);
     h+=ixSection(c);
-    h+=`<section><h3>${tr('Private interconnects (PNI)')}</h3><p class="lead">${tr('A dedicated cross-connect to one network in {dc}. Needs more traffic than IX peering, but has its own capacity.',{dc:esc(C.dc)})}</p>`;
+    h+=`<section><h3>${tr('Private interconnects (PNI)')}</h3><p class="lead">${tr('A dedicated cross-connect to one network in {dc}. Needs more traffic than IX peering, but has its own capacity.',{dc:esc(C.dc)})}</p>`+pniAllCtl(c);
     const here=NETS.filter(n=>n.pops.includes(c));
     for(const n of here){const pn=S.pni.find(x=>x.city===c&&x.net===n.id),chk=peerOk(n.id,'pni',c);
       h+=`<div class="row">${logo(n)}<div class="grow"><div class="nm">${esc(n.name)} <span class="tag ${n.pol}">${n.pol}</span></div>`;
@@ -3663,11 +3685,16 @@ function subUpgradePanel(l){return `<h4 class="sub4">${tr('Submarine transmissio
   const at=l['sub'+k],done=subUpgradeReady(l,k),cost=subUpgradeCost(l,k),preview={...l,['sub'+k]:S.day};
   const status=done?tr('Installed'):at!==undefined?tr('Ready in {n} days',{n:Math.max(0,at-S.day)}):tr('{price} · {n} days',{price:fmt$(cost),n:U.days});
   return `<div class="row"><div class="grow"><div class="nm">${tr(U.n)}</div><div class="meta">${status}</div><div class="meta">${tr('Up to {g} per channel',{g:fmtG(submarineRate(preview))})}</div></div>${at===undefined?btn(tr('Install'),'subUpgrade',{id:l.id,k},'sm',lvl()<4||S.cash<cost):''}</div>`;}).join('');}
+// Each crew hire takes 30 days off your own build, but never past tomorrow. Finishing now costs every hire that
+// would still help, the same as clicking until it cannot go faster, and the fiber is done today.
+const crewCost=l=>Math.round(15000+l.km*6),crewHires=l=>Math.max(0,Math.ceil((l.ready-S.day-1)/30));
+function fiberDone(l){const a=CITY[l.a].name,b=CITY[l.b].name;
+  toast(`<b>${l.own?tr('Your fiber is finished: {a}–{b}',{a,b}):tr('Dark fiber handed over: {a}–{b}',{a,b})}</b><br>${(l.ch||[]).length?tr('Channels are lighting up now.'):tr('It is dark. Add optics to light it up.')}`,'goal',[{l:tr('Open'),act:'selLink',args:{id:l.id}}]);sfx('coin');}
 function dfPanel(l){
   const load=R.load[l.id]||0,cap=dfCap(l),u=cap?load/cap:0,bld=l.ready>S.day,A=CITY[l.a].name,B=CITY[l.b].name,inc=S.inc.find(i=>i.ref===l.id||i.ref===(l.trench||l.id)),amps=ampCount(l.km),sysD=DF_SYS[l.sys];
   let h=`<div class="ph"><div><div class="eyebrow">${tr('Dark fiber · {kind} · {km} km',{kind:l.own?tr('your own build'):tr('leased IRU'),km:l.km.toLocaleString()})}</div><h2>${A} ⇄ ${B}</h2></div><button class="x" data-act="closePanel" aria-label="${tr('Close')}">×</button></div><div class="scroll">`;
   if(bld){const tot=Math.max(1,l.ready-l.day),done=clamp((S.day-l.day)/tot,0,1);
-    h+=`<section><h3>${l.own?tr('Under construction'):tr('Being spliced')}</h3><div class="kv"><span>${l.own?tr('Permits, trenching, splicing'):tr('IRU handover')}</span><b>${tr('{n} days left',{n:l.ready-S.day})}</b></div><div class="bar me"><i style="width:${done*100}%"></i></div>${l.own?btn(tr('Hire extra crews <small>{price} · −30 days</small>',{price:fmt$(Math.round(15000+l.km*6))}),'crews',{id:l.id},'sm',S.cash<15000+l.km*6):''}<p class="note">${tr("You can pre-install optics now so it lights up the day it's ready.")}</p></section>`;}
+    h+=`<section><h3>${l.own?tr('Under construction'):tr('Being spliced')}</h3><div class="kv"><span>${l.own?tr('Permits, trenching, splicing'):tr('IRU handover')}</span><b>${tr('{n} days left',{n:l.ready-S.day})}</b></div><div class="bar me"><i style="width:${done*100}%"></i></div>${l.own&&crewHires(l)>=1?(c=>`<div class="btns">${btn(tr('Hire extra crews <small>{price} · −30 days</small>',{price:fmt$(c)}),'crews',{id:l.id},'sm',S.cash<c)}${btn(tr('Finish now <small>{price}</small>',{price:fmt$(c*crewHires(l))}),'finishNow',{id:l.id},'sm',S.cash<c*crewHires(l))}</div>`)(crewCost(l)):''}<p class="note">${tr("You can pre-install optics now so it lights up the day it's ready.")}</p></section>`;}
   else if(inc&&linkDown(l))h+=`<section><h3 style="color:var(--bad)">${tr('Dark!')}</h3><p class="lead">${esc(inc.msg)}</p>${inc.cost?btn(`${esc(inc.fix||tr('Rush repair'))} ${fmt$(inc.cost)}`,'fixInc',{id:inc.id},'red',S.cash<inc.cost):''}</section>`;
   h+=`<section><h3>${tr('Capacity')}</h3><div class="kv"><span>${tr('{n} of {max} channels lit',{n:(l.ch||[]).length,max:chMax(l)})}${soldSlots(l)?` · ${tr('{n} sold as alien waves',{n:soldSlots(l)})}`:''}</span><b>${fmtG(load)} / ${fmtG(cap)}</b></div><div class="bar ${barCls(u)}"><i style="width:${Math.min(100,u*100)}%"></i></div>
   ${l.own&&l.sub?`<div class="kv"><span>${tr('Cable design')}</span><b>${tr((SEA_DESIGNS[l.seaDesign]||SEA_DESIGNS.standard).n)}</b></div>`:''}

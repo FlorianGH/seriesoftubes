@@ -2712,4 +2712,10 @@
 "Loaded {name}. Check it, then deploy.":"{name} chargé. Vérifiez-le, puis déployez.",
 "<b>Commit complete. Traffic down {p}.</b><br>The AI apologises for the confusion, and remains completely sure the script was right. Fix it from the NOC tab.":"<b>Commit terminé. Trafic en baisse de {p}.</b><br>L’IA s’excuse pour la confusion, et reste absolument certaine que le script était juste. Corrigez-le depuis l’onglet NOC.",
 "Rules for your Auto-TE controller: which exits to prefer, which to avoid, and when to spill onto the next one. The editor’s help explains every rule and has ready-made scripts.":"Des règles pour votre contrôleur Auto-TE : quelles sorties préférer, lesquelles éviter et quand déborder sur la suivante. L’aide de l’éditeur explique chaque règle et propose des scripts tout prêts.",
+"Finish now <small>{price}</small>":"Terminer maintenant <small>{price}</small>",
+"Port:":"Port :",
+"PNI with all {n} willing networks <small>{cost} + {mo}/mo</small>":"PNI avec les {n} réseaux partants <small>{cost} + {mo}/mois</small>",
+"Needs {need} free router ports here, {free} left.":"Il faut {need} ports routeur libres ici, il en reste {free}.",
+"<b>{n} new PNI in {city}.</b><br>A cross-connect in {dc}. Private and fast.":"<b>{n} nouveau PNI à {city}.</b><br>Un cross-connect dans {dc}. Privé et rapide.",
+"<b>{n} new PNIs in {city}.</b><br>One cross-connect per network in {dc}. Private and fast.":"<b>{n} nouveaux PNI à {city}.</b><br>Un cross-connect par réseau dans {dc}. Privés et rapides.",
 };
