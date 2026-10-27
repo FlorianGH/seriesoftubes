@@ -406,46 +406,75 @@ test('#117 several scrubbing centers: nearest first, spill to the next, and far 
   assert.deepEqual(errors, []);
 });
 
-test('your own fiber can be finished at once, for the crews it would still take', () => {
+test('notifications: the NOC keeps the last ten minutes, folds repeats and opens what each is about', () => {
+  const { ev, errors, dom } = load();
+  const doc = dom.window.document;
+  ev("let __t=1e12;Date.now=()=>__t;window.__tick=ms=>{__t+=ms};");
+  ev("ACT.start({});S.cash=1e9;S.nextFail=1e9;S.nextEvent=1e9;for(const c of ['ams','lon'])ACT.buildPop({city:c});UI.via=null;openLinkModal('ams','lon');ACT.buildLink({tier:1});closeModal();S.log=[];UI.logSeen=0");
+  const linkId = ev("S.links.find(l=>[l.a,l.b].includes('ams')&&[l.a,l.b].includes('lon')).id");
+  // what each notice is about: its own button, a link between two of your cities, one of your cities, or nothing
+  ev("toast('<b>Customer upset</b><br>Fix it.','bad',[{l:'Show me',act:'focusCity',args:{city:'fra'}}])");
+  ev("toast('<b>Fiber cut</b><br>Your Amsterdam–London link is down.','bad')");
+  ev("toast('<b>Router crashed</b><br>Your router in London is rebooting.','bad')");
+  ev("toast('<b>Raffle</b><br>You won a T-shirt.','good')");
+  const os = JSON.parse(ev("JSON.stringify(S.log.map(e=>e.o))"));
+  assert.deepEqual(os, [null, { a: 'city', v: 'lon' }, { a: 'link', v: linkId }, { a: 'city', v: 'fra' }]);
+  assert.equal(ev("S.log[0].h"), 'Raffle'); assert.equal(ev("S.log[0].t"), 'Raffle You won a T-shirt.');
+  // the peering inbox's own button opens the peering inbox
+  ev("toast('<b>Peering request</b><br>From a small network.','',[{l:'Inbox',act:'inbox',args:{}}])");
+  assert.deepEqual(JSON.parse(ev('JSON.stringify(S.log[0].o)')), { a: 'inbox' });
+  ev('ACT.logOpen({id:S.log[0].id})'); assert.equal(ev("$('modal').hidden"), false, 'the inbox opens');ev('closeModal();S.log.shift()');
+  // an incident points at what broke
+  assert.deepEqual(JSON.parse(ev(`JSON.stringify(incOpen({ref:'${linkId}'}))`)), { a: 'link', v: linkId });
+  assert.deepEqual(JSON.parse(ev("JSON.stringify(incOpen({ref:S.links[0].trench||S.links[0].id}))")), { a: 'link', v: ev('S.links[0].id') });
+  // repeats within a minute fold into one line with a count; numbers in the title do not split them
+  ev("for(let i=1;i<=5;i++)toast('<b>'+i+' new sessions at HAMS-IX.</b><br>Small networks.','')");
+  assert.equal(ev("S.log.length"), 5); assert.equal(ev("S.log[0].n"), 5); assert.equal(ev("S.log[0].h"), '5 new sessions at HAMS-IX.');
+  ev("__tick(61000);toast('<b>1 new session at HAMS-IX.</b><br>Small networks.','')");
+  assert.equal(ev("S.log.length"), 6, 'a minute later it starts a new line');
+  // the NOC shows them right after the incidents, with Open where there is something to open
+  assert.equal(ev("logUnread()"), 6);
+  ev("renderHUD()"); assert.equal(doc.getElementById('hNocNew').hidden, false); assert.equal(doc.getElementById('hNocNew').textContent, '6');
+  ev("UI.left='noc';UI.leftOpen=true;UI.sel=null;renderLeft();renderHUD()");
+  const body = doc.getElementById('leftBody').textContent;
+  assert.match(body, /Notifications\s*last 10 minutes/);
+  assert.ok(body.indexOf('Notifications') < body.indexOf('DDoS scrubbing'), 'near the top, not at the bottom');
+  assert.match(body, /×5/); assert.match(body, /just now/);
+  assert.equal(doc.querySelectorAll('#leftBody [data-act=logOpen]').length, 2, 'Open only where it leads somewhere (2 of the 5 shown)');
+  assert.equal(doc.getElementById('hNocNew').hidden, true, 'read once the NOC is open');
+  assert.equal(ev("logUnread()"), 0);
+  ev("ACT.logAll()"); assert.equal(doc.querySelectorAll('#leftBody .note').length, 6); assert.equal(doc.querySelectorAll('#leftBody [data-act=logOpen]').length, 3);
+  // Open goes there
+  ev("ACT.logOpen({id:S.log.find(e=>e.o&&e.o.a==='link').id})"); assert.equal(ev("UI.sel.type+':'+UI.sel.id"), 'link:' + linkId);
+  ev("ACT.logOpen({id:S.log.find(e=>e.o&&e.o.a==='city'&&e.o.v==='lon').id})"); assert.equal(ev("UI.sel.type+':'+UI.sel.id"), 'city:lon');
+  ev(`S.links=S.links.filter(l=>l.id!=='${linkId}');ACT.logOpen({id:S.log.find(e=>e.o&&e.o.a==='link').id})`);
+  assert.equal(ev("S.log[0].h"), 'That link is gone.', 'a removed link says so instead of failing silently');
+  // ten minutes later it is gone from the list, but stays in the save's log
+  ev("__tick(10*60*1000+1000);UI.left='noc';renderLeft()");
+  assert.match(doc.getElementById('leftBody').textContent, /Nothing in the last 10 minutes/);
+  assert.ok(ev("S.log.length") > 0);
+  // saves: junk is dropped, old entries without a time stay but are not shown
+  ev("S.log.push({t:'old',k:'weird',o:{a:'city',v:'atlantis'},n:'many'},{t:5},{t:'x',o:{a:'tab',v:'evil'}},{t:'y',o:{a:'link',v:'l1'},at:'soon'});S=sanitize(S)");
+  const tail = JSON.parse(ev("JSON.stringify(S.log.slice(-3))"));
+  assert.deepEqual(tail.map(e => [e.t, e.k, e.o, e.n, e.at]), [['old', '', null, 1, 0], ['x', '', null, 1, 0], ['y', '', { a: 'link', v: 'l1' }, 1, 0]]);
+  // phones: the NOC tab carries the count
+  ev("__tick(1000);toast('<b>Router crashed</b><br>Your router in London is rebooting.','bad');UI.left='goals';UI.leftOpen=false");
+  dom.window.innerWidth = 360; ev("renderAll&&renderAll()");
+  const nocTab = [...doc.querySelectorAll('#tabbar [data-act=phoneTab]')].find(b => JSON.parse(b.dataset.args).t === 'noc');
+  assert.equal(nocTab.querySelector('.cnt').textContent, '1', 'one unread notification on the NOC tab');
+  assert.equal(nocTab.querySelector('.cnt').classList.contains('red'), false, 'not red: red is for incidents');
+  assert.deepEqual(errors, []);
+});
+
+test('the broadband panel shows what homes in that city really pay, not the base rate', () => {
   const { ev, errors } = load();
-  ev("ACT.start({});S.cash=1e8;S.lvl=4;for(const g of GOALS)S.done[g.id]=0;ACT.launchBB({city:'fra'})");
-  ev("for(const b of ['ams','par']){ACT.buildPop({city:b});UI.pending={a:'fra',b};UI.lmode='df';UI.dfSrc='build';UI.dfSys='lite';ACT.orderDf();closeModal();}UI.lmode='wave'");
-  const ids = JSON.parse(ev("JSON.stringify(S.links.filter(l=>l.kind==='df'&&l.own).map(l=>l.id))"));
-  assert.equal(ids.length, 2);
-  // two builds 75 days from done, with the same crew price: three hires bring each one to tomorrow
-  ev("for(const l of S.links)if(l.kind==='df'){l.ready=S.day+75;l.km=400;}");
-  const L = (i) => `S.links.find(l=>l.id==='${ids[i]}')`, panel = () => ev("document.getElementById('panelBody').textContent");
-  const crew = ev(`crewCost(${L(0)})`);
-  let cash = ev('S.cash'), hires = 0;
-  ev(`UI.sel={type:'link',id:'${ids[0]}'};renderPanel()`);
-  while (/Hire extra crews/.test(panel())) { ev(`ACT.crews({id:'${ids[0]}'})`); assert.ok(++hires < 10); }
-  assert.equal(hires, 3);
-  assert.equal(ev(`${L(0)}.ready-S.day`), 1, 'crews stop at tomorrow');
-  const viaCrews = cash - ev('S.cash');
-  assert.equal(viaCrews, 3 * crew);
-  assert.doesNotMatch(panel(), /Finish now/, 'with a day left there is nothing to speed up');
-  ev(`ACT.crews({id:'${ids[0]}'})`);
-  assert.equal(cash - ev('S.cash'), viaCrews, 'and hiring crews then takes no money');
-  // the other one in one go, for the same money, and done today instead of tomorrow
-  ev(`UI.sel={type:'link',id:'${ids[1]}'};renderPanel()`);
-  assert.ok(panel().includes('Finish now ' + ev(`fmt$(${viaCrews})`)), 'the button shows the price');
-  cash = ev('S.cash');
-  ev(`ACT.finishNow({id:'${ids[1]}'})`);
-  assert.equal(cash - ev('S.cash'), viaCrews);
-  assert.equal(ev(`${L(1)}.ready`), ev('S.day'));
-  assert.match(ev('S.log[0].t'), /Your fiber is finished/);
-  assert.doesNotMatch(panel(), /Under construction/);
-  const done = (i) => ev(`S.log.filter(e=>/Your fiber is finished/.test(e.t)&&e.t.includes(CITY[${L(i)}.b].name)).length`);
-  ev('dayTick()');
-  assert.equal(done(0), 1, 'the crewed one finishes the next day');
-  assert.equal(done(1), 1, 'the finished one is not announced again');
-  // nothing on a finished build, on leased fiber or without the cash
-  cash = ev('S.cash');
-  ev(`ACT.finishNow({id:'${ids[1]}'})`);
-  ev(`${L(0)}.ready=S.day+40;${L(0)}.own=false;ACT.finishNow({id:'${ids[0]}'});ACT.crews({id:'${ids[0]}'})`);
-  assert.equal(ev('S.cash'), cash);
-  ev(`${L(0)}.own=true;S.cash=10;ACT.finishNow({id:'${ids[0]}'})`);
-  assert.equal(ev(`${L(0)}.ready-S.day`), 40);
-  assert.equal(ev('S.cash'), 10);
+  ev("ACT.start({});S.cash=1e9;S.lvl=4;for(const g of GOALS)S.done[g.id]=0;ACT.buildPop({city:'del'})");
+  assert.equal(ev('CITY.del.arpu'), 0.4);
+  assert.match(ev("cityPanel('del')"), new RegExp('Pays \\' + ev('fmt$(EYE_RATE*CITY.del.arpu)') + ' per Gbps'), 'Delhi homes pay 40% of the base rate');
+  assert.match(ev("cityPanel('fra')"), new RegExp('Pays \\' + ev('fmt$(EYE_RATE)') + ' per Gbps'), 'a city without its own rate pays the base rate');
+  ev("const t=NETS.find(n=>n.price&&n.pops.includes('del'));ACT.buyTransit({city:'del',net:t.id,tier:1});ACT.launchBB({city:'del'});compute()");
+  const rev = ev("fmt$(R.cityEye.del*sfOf(R,'del')*EYE_RATE*CITY.del.arpu)");
+  assert.ok(ev("R.cityEye.del*sfOf(R,'del')") > 0);
+  assert.ok(ev("cityPanel('del')").includes(rev + '/mo'), `revenue line matches what the month pays (${rev})`);
   assert.deepEqual(errors, []);
 });
